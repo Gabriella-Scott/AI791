@@ -27,7 +27,8 @@ class DifferentialEvolution:
                  F: float = 0.8,
                  CR: float = 0.9,
                  max_fes: int = 10000,
-                 seed: int = None):
+                 seed: int = None,
+                 crossover_type: str = 'bin'):
         
         # Initialize DE algorithm
         self.func = func
@@ -36,7 +37,8 @@ class DifferentialEvolution:
         self.CR = CR
         self.max_fes = max_fes
         self.dimensions = func.dimensions
-        self.convergence_curve = []
+        self.crossover_type = crossover_type
+        
         
         if seed is not None:
             np.random.seed(seed)
@@ -45,6 +47,7 @@ class DifferentialEvolution:
         self.fitness = None
         self.best_individual = None
         self.best_fitness = np.inf
+        self.convergence_curve = []
         self.fes = 0
 
     # Initialize population uniformly within bounds    
@@ -71,24 +74,152 @@ class DifferentialEvolution:
     # Clip individual to bounds    
     def _repair(self, individual: np.ndarray) -> np.ndarray:
         return np.clip(individual, self.func.lower_bound, self.func.upper_bound)
-        
+
+    # DE/rand/2 mutation strategy: v_i = x_r1 + F * (x_r2 - x_r3) + F * (x_r4 - x_r5) 
     def mutate(self, idx: int) -> np.ndarray:
-        """
-        DE/rand/1 mutation: v = x_r1 + F * (x_r2 - x_r3)
-        """
+        # Select 5 distinct random indices different from idx
         candidates = [i for i in range(self.pop_size) if i != idx]
-        r1, r2, r3 = np.random.choice(candidates, 3, replace=False)
-        mutant = self.population[r1] + self.F * (self.population[r2] - self.population[r3])
-        return self._repair(mutant)
+        r1, r2, r3, r4, r5 = np.random.choice(candidates, 5, replace=False)
+        
+        # Create mutant vector using DE/rand/2 strategy
+        mutant = (self.population[r1] + 
+                  self.F * (self.population[r2] - self.population[r3]) +
+                  self.F * (self.population[r4] - self.population[r5]))
+        
+        return mutant
         
     # Binomial crossover
-    def crossover(self, target: np.ndarray, mutant: np.ndarray) -> np.ndarray:
+    def crossover_bin(self, target: np.ndarray, mutant: np.ndarray) -> np.ndarray:
         trial = target.copy()
         jrand = np.random.randint(0, self.dimensions)
+
         for j in range(self.dimensions):
             if np.random.rand() < self.CR or j == jrand:
                 trial[j] = mutant[j]
+
         return trial
+    
+    # Arithmetic crossover
+    def crossover_arith(self, target: np.ndarray, mutant: np.ndarray) -> np.ndarray:
+        # Sample gamma_ij from uniform distribution [0, 1] for each dimension
+        gamma = np.random.uniform(0, 1, self.dimensions)
+        # Create offspring using arithmetic crossover
+        offspring = (1 - gamma) * target + gamma * mutant
+        
+        return offspring
+    
+    # Unimodal Normal Distribution Crossover (UNDX)
+    def crossover_undx(self, target: np.ndarray, mutant: np.ndarray) -> np.ndarray:
+        candidates = list(range(self.pop_size))
+        
+        # Find and exclude target index
+        target_idx = None
+        for i in range(self.pop_size):
+            if np.array_equal(self.population[i], target):
+                target_idx = i
+                break
+                
+        if target_idx is not None:
+            candidates.remove(target_idx)
+            
+        third_parent_idx = np.random.choice(candidates)
+        third_parent = self.population[third_parent_idx]
+        
+        # For nu = 3 parents, use nu - 1 = 2 parents to form main direction
+        # Use target and mutant as the first two parents
+        parent1 = target
+        parent2 = mutant
+        parent3 = third_parent  # The third parent for orthogonal component
+        
+        # Calculate center of mass of first nu-1 = 2 parents
+        x_bar = (parent1 + parent2) / 2.0
+        
+        # Direction vector from center to parent1
+        d = parent1 - x_bar
+        d_norm = np.linalg.norm(d)
+        
+        # Direction cosine (unit vector)
+        if d_norm > 1e-10:
+            e = d / d_norm
+        else:
+            # If parents are identical, use random direction
+            e = np.random.randn(self.dimensions)
+            e = e / np.linalg.norm(e)
+            d_norm = 0.0
+        
+        # Orthogonal distance of third parent to the main direction
+        # Project parent3 - x_bar onto the direction e
+        diff = parent3 - x_bar
+        projection = np.dot(diff, e) * e
+        orthogonal = diff - projection
+        delta = np.linalg.norm(orthogonal)
+        
+        # Standard deviations
+        sigma1 = 1.0
+        # For ns = dimensions
+        sigma2 = np.sqrt(0.35 / max(1, self.dimensions - 1))
+        
+        # Main direction component
+        main_component = np.random.randn() * sigma1 * d_norm * e
+        
+        # Orthogonal components - create orthonormal basis perpendicular to e
+        orthogonal_component = np.zeros(self.dimensions)
+        
+        # For simplicity in high dimensions, sample random orthogonal directions
+        for _ in range(self.dimensions - 1):
+            # Generate random vector
+            rand_vec = np.random.randn(self.dimensions)
+            # Make it orthogonal to main direction e
+            rand_vec = rand_vec - np.dot(rand_vec, e) * e
+            # Normalize
+            norm = np.linalg.norm(rand_vec)
+            if norm > 1e-10:
+                rand_vec = rand_vec / norm
+                # Add Gaussian noise in this orthogonal direction
+                orthogonal_component += np.random.randn() * sigma2 * delta * rand_vec
+        
+        # Create offspring
+        offspring = x_bar + main_component + orthogonal_component
+        
+        return offspring
+
+    # Simplex Crossover (SPX)
+    def crossover_spx(self, target: np.ndarray, mutant: np.ndarray) -> np.ndarray:
+        # Select third parent (different from target)
+        candidates = list(range(self.pop_size))
+        
+        # Find and exclude target index
+        target_idx = None
+        for i in range(self.pop_size):
+            if np.array_equal(self.population[i], target):
+                target_idx = i
+                break
+                
+        if target_idx is not None:
+            candidates.remove(target_idx)
+            
+        third_parent_idx = np.random.choice(candidates)
+        third_parent = self.population[third_parent_idx]
+        
+        parents = np.array([target, mutant, third_parent])
+        nµ = len(parents)
+        
+        # Calculate center of mass (center of gravity)
+        G = np.mean(parents, axis=0)
+        
+        # Expansion coefficient (gamma in textbook)
+        epsilon = 0.5
+        
+        # Generate random weights that sum to 1 for uniform sampling from simplex
+        r = np.random.uniform(0, 1, nµ)
+        r = r / np.sum(r)
+        
+        # Create offspring using SPX formula from textbook
+        offspring = np.zeros(self.dimensions)
+        for i, parent in enumerate(parents):
+            offspring += r[i] * (G + (1 + epsilon) * (parent - G))
+            
+        return offspring
     
     # Run the DE algorithm    
     def run(self) -> Tuple[np.ndarray, float]:
@@ -102,8 +233,18 @@ class DifferentialEvolution:
                 # Mutation
                 mutant = self.mutate(i)
                 
-                # Crossover
-                trial = self.crossover(self.population[i], mutant)
+                # Crossover select based on crossover type
+                if self.crossover_type == 'bin':
+                    trial = self.crossover_bin(self.population[i], mutant)
+                elif self.crossover_type == 'ax':
+                    trial = self.crossover_arith(self.population[i], mutant)
+                elif self.crossover_type == 'spx':
+                    trial = self.crossover_spx(self.population[i], mutant)
+                elif self.crossover_type == 'undx':
+                    trial = self.crossover_undx(self.population[i], mutant)
+                else:
+                    raise ValueError(f"Unknown crossover type: {self.crossover_type}")
+                    
                 trial = self._repair(trial)
                 
                 # Selection
@@ -122,10 +263,21 @@ TRIALS = 5
 POPULATION_SIZE = 50
 DIMENSIONS = 10
 MAX_FES = 10000
-DE_OPTIONS = {
-    'DE/rand/1/bin': DifferentialEvolution,
-    # Future: Add more DE variants here
+# Mapping from short names to (full name, crossover type)
+DE_VARIANT_MAP = {
+    'bin': ('DE/rand/2/bin', 'bin'),
+    'ax': ('DE/rand/2/AX', 'ax'),
+    'spx': ('DE/rand/2/SPX', 'spx'),
+    'undx': ('DE/rand/2/UNDX', 'undx')
 }
+
+DE_OPTIONS = {
+    'DE/rand/2/bin': 'bin',
+    'DE/rand/2/AX': 'ax',
+    'DE/rand/2/SPX': 'spx',
+    'DE/rand/2/UNDX': 'undx'
+}
+
 BENCHMARKS = ["sphere", "ackley", "griewank", "rastrigin", "weierstrass"]
 # TODO: Think about differing population size and benchmark dimensions
 
@@ -141,17 +293,19 @@ def get_avg_convergence_curve(convergence_curves: List[List[float]]) -> List[flo
         avg_curve.append(avg_value)
     return avg_curve
 
-def de_stats(benchmark_name: str, class_name: object):
+def de_stats(benchmark_name: str, crossover_type: str):
     benchmark_function = BenchmarkFunction(benchmark_name, DIMENSIONS)
     all_fitnesses = []
     convergence_curves = []
     
     for trial in range(TRIALS):
-        de = class_name(benchmark_function, pop_size=POPULATION_SIZE, max_fes=MAX_FES)
+        de = DifferentialEvolution(benchmark_function, pop_size=POPULATION_SIZE, 
+                                   max_fes=MAX_FES, crossover_type=crossover_type)
         best_individual, best_fitness = de.run()
         convergence_curves.append(de.convergence_curve)
         all_fitnesses.append(best_fitness)
         print(f"Trial {trial + 1}: Best Fitness = {best_fitness:.6f}")
+
     print(f"Average Fitness: {np.mean(all_fitnesses):.6f}")
     print("Min Fitness: {:.6f}".format(np.min(all_fitnesses)))
     print("Max Fitness: {:.6f}".format(np.max(all_fitnesses)))
@@ -161,19 +315,24 @@ def de_stats(benchmark_name: str, class_name: object):
 
 def run_all_de_stats(de_option=None):
     for benchmark in BENCHMARKS:
-        for de_variant, de_class in DE_OPTIONS.items():
+        for de_variant, crossover_type in DE_OPTIONS.items():
             if de_option is None or de_option == de_variant:
                 print(f"\nRunning {de_variant} on {benchmark} benchmark:")
-                de_stats(benchmark, de_class)
+                de_stats(benchmark, crossover_type)
 
 def main():
     if len(sys.argv) > 1:
         de_option = sys.argv[1]
-        if de_option not in DE_OPTIONS:
+        
+        if de_option in DE_VARIANT_MAP:
+            full_name, _ = DE_VARIANT_MAP[de_option]
+            run_all_de_stats(full_name)
+        elif de_option in DE_OPTIONS:
+            run_all_de_stats(de_option)
+        else:
             print(f"Unknown DE option: {de_option}")
-            print(f"Available options: {list(DE_OPTIONS.keys())}")
+            print(f"Available options: {list(DE_VARIANT_MAP.keys())} or {list(DE_OPTIONS.keys())}")
             return
-        run_all_de_stats(de_option)
     else:
         run_all_de_stats()
 
