@@ -34,24 +34,36 @@ def weierstrass_function(x):
     b = 3
     j_max = 20
     n = len(x)
-    
-    f_x = 0
+
+    sum2 = 0.0
+    for j in range(0, j_max + 1):
+        sum2 += (a**j) * (np.cos(np.pi * (b**j)))
+    sum2 *= n
+
+    f_x = 0.0
     for i in range(n):
         sum1 = 0.0
-        sum2 = 0.0
-        for j in range(j_max + 1):
-            sum1 += a**j * np.cos(2 * np.pi * b**j * (x[i] + 0.5))
-            sum2 += a**j * np.cos(np.pi * b**j)
-        sum2 = sum2 * n
+        for j in range(0, j_max + 1):
+            sum1 += (a**j) * (np.cos((2 * np.pi * (b**j)) * (x[i] + 0.5)))
         f_x += sum1 - sum2
     return f_x
+
+def rosenbrock_function(x):
+    f_x = 0.0
+    n = len(x)
+
+    for i in range(n - 1):
+        f_x += 100 * (x[i + 1] - x[i]**2)**2 + (x[i] - 1)**2
     
+    return f_x
+        
 BENCHMARK_FUNCTIONS = {
     'sphere': (sphere_function, (-100, 100)), # min = 0, x = 0
     'ackley': (ackley_function, (-32, 32)), # min = 0, x = 0
     'griewank': (griewank_function, (-600, 600)), # min = 0, x = 0
     'rastrigin': (rastrigin_function, (-5.12, 5.12)), # min = 0, x = 0
-    'weierstrass': (weierstrass_function, (-0.5, 0.5)) # min = 4, x = 0
+    # 'weierstrass': (weierstrass_function, (-0.5, 0.5)), # min = 4, x = 0
+    'rosenbrock': (rosenbrock_function, (-30, 30)) # min = 0, x = 1
 }
 
 def get_benchmark_function(name):

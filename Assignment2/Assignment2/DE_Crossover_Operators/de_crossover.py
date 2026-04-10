@@ -1,7 +1,7 @@
 
 import numpy as np
 import sys
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 from benchmark_functions import BENCHMARK_FUNCTIONS
 
 """Wrapper for benchmark functions"""
@@ -220,7 +220,98 @@ class DifferentialEvolution:
             offspring += r[i] * (G + (1 + epsilon) * (parent - G))
             
         return offspring
+
+    # Parent Centric Crossover (PCX)
+    def crossover_pcx(self, target: np.ndarray, mutant: np.ndarray) -> np.ndarray:
+        # PCX uses 3 parents: target, mutant, and a third parent
+        candidates = list(range(self.pop_size))
+        
+        # Find and exclude target index
+        target_idx = None
+        for i in range(self.pop_size):
+            if np.array_equal(self.population[i], target):
+                target_idx = i
+                break
+                
+        if target_idx is not None:
+            candidates.remove(target_idx)
+            
+        third_parent_idx = np.random.choice(candidates)
+        third_parent = self.population[third_parent_idx]
+        
+        # Collect all nµ = 3 parents
+        parents = [target, mutant, third_parent]
+        nµ = len(parents)
+        
+        # Calculate center of mass (mean) of all parents
+        x_bar = np.mean(parents, axis=0)
+        
+        # Randomly select one parent around which to generate offspring
+        selected_idx = np.random.randint(0, nµ)
+        selected_parent = parents[selected_idx]
+        
+        # Calculate direction vector from center to selected parent
+        d = selected_parent - x_bar
+        d_norm = np.linalg.norm(d)
+        
+        # Normalize direction vector
+        if d_norm > 1e-10:
+            d_unit = d / d_norm
+        else:
+            # If selected parent is at center, use random direction
+            d_unit = np.random.randn(self.dimensions)
+            d_unit = d_unit / np.linalg.norm(d_unit)
+            d_norm = 0.0
+        
+        # Calculate perpendicular distances from other parents to the line d
+        perpendicular_distances = []
+        for idx, parent in enumerate(parents):
+            if idx != selected_idx:
+                # Vector from center to this parent
+                diff = parent - x_bar
+                # Project onto direction d to get parallel component
+                projection = np.dot(diff, d_unit) * d_unit
+                # Orthogonal component
+                orthogonal = diff - projection
+                # Distance
+                delta_l = np.linalg.norm(orthogonal)
+                perpendicular_distances.append(delta_l)
+        
+        # Average perpendicular distance (equation 9.17)
+        delta_bar = np.mean(perpendicular_distances)
+        
+        # Variance parameters (commonly used values for PCX)
+        sigma1 = 0.1  # For main direction
+        sigma2 = 0.1  # For orthogonal directions
+        
+        # Generate offspring according to equation (9.18)
+        # x̃(t) = x(t) + N(0,σ₁²)|d(t)| + Σ N(0,σ₂²)δ̄e_l(t)
+        
+        # Main direction component with Gaussian noise
+        main_component = np.random.randn() * sigma1 * d_norm * d_unit
+        
+        # Orthogonal components - create orthonormal basis perpendicular to d
+        orthogonal_component = np.zeros(self.dimensions)
+        
+        # Generate nµ-1 = 2 orthogonal directions
+        for _ in range(nµ - 1):
+            # Random vector
+            rand_vec = np.random.randn(self.dimensions)
+            # Make orthogonal to main direction
+            rand_vec = rand_vec - np.dot(rand_vec, d_unit) * d_unit
+            # Normalize
+            norm = np.linalg.norm(rand_vec)
+            if norm > 1e-10:
+                rand_vec = rand_vec / norm
+                # Add Gaussian noise in this orthogonal direction
+                orthogonal_component += np.random.randn() * sigma2 * delta_bar * rand_vec
+        
+        # Create offspring (equation 9.18)
+        offspring = selected_parent + main_component + orthogonal_component
+        
+        return offspring
     
+
     # Run the DE algorithm    
     def run(self) -> Tuple[np.ndarray, float]:
         self.initialize_population()
@@ -242,6 +333,8 @@ class DifferentialEvolution:
                     trial = self.crossover_spx(self.population[i], mutant)
                 elif self.crossover_type == 'undx':
                     trial = self.crossover_undx(self.population[i], mutant)
+                elif self.crossover_type == 'pcx':
+                    trial = self.crossover_pcx(self.population[i], mutant)
                 else:
                     raise ValueError(f"Unknown crossover type: {self.crossover_type}")
                     
@@ -259,7 +352,7 @@ class DifferentialEvolution:
             self.convergence_curve.append(self.best_fitness)
         return self.best_individual, self.best_fitness
 
-TRIALS = 5
+TRIALS = 20
 POPULATION_SIZE = 50
 DIMENSIONS = 10
 MAX_FES = 10000
@@ -268,17 +361,19 @@ DE_VARIANT_MAP = {
     'bin': ('DE/rand/2/bin', 'bin'),
     'ax': ('DE/rand/2/AX', 'ax'),
     'spx': ('DE/rand/2/SPX', 'spx'),
-    'undx': ('DE/rand/2/UNDX', 'undx')
+    'undx': ('DE/rand/2/UNDX', 'undx'),
+    'pcx': ('DE/rand/2/PCX', 'pcx')
 }
 
 DE_OPTIONS = {
     'DE/rand/2/bin': 'bin',
     'DE/rand/2/AX': 'ax',
     'DE/rand/2/SPX': 'spx',
-    'DE/rand/2/UNDX': 'undx'
+    'DE/rand/2/UNDX': 'undx',
+    'DE/rand/2/PCX': 'pcx'
 }
 
-BENCHMARKS = ["sphere", "ackley", "griewank", "rastrigin", "weierstrass"]
+BENCHMARKS = ["sphere", "ackley", "griewank", "rastrigin", "rosenbrock"]
 # TODO: Think about differing population size and benchmark dimensions
 
 def get_avg_convergence_curve(convergence_curves: List[List[float]]) -> List[float]:
@@ -311,14 +406,42 @@ def de_stats(benchmark_name: str, crossover_type: str):
     print("Max Fitness: {:.6f}".format(np.max(all_fitnesses)))
     print(f"Standard Deviation: {np.std(all_fitnesses):.6f}")
     avg_curve = get_avg_convergence_curve(convergence_curves)
-    print(f"Average Convergence Curve: {avg_curve}")
+    
+    # Return results for plotting
+    return {
+        'fitnesses': all_fitnesses,
+        'avg_convergence': avg_curve,
+        'mean': np.mean(all_fitnesses),
+        'std': np.std(all_fitnesses),
+        'min': np.min(all_fitnesses),
+        'max': np.max(all_fitnesses)
+    }
 
 def run_all_de_stats(de_option=None):
+    results = {}
     for benchmark in BENCHMARKS:
+        results[benchmark] = {}
         for de_variant, crossover_type in DE_OPTIONS.items():
             if de_option is None or de_option == de_variant:
                 print(f"\nRunning {de_variant} on {benchmark} benchmark:")
-                de_stats(benchmark, crossover_type)
+                results[benchmark][de_variant] = de_stats(benchmark, crossover_type)
+    
+    # Generate plots if running all algorithms
+    if de_option is None or len([k for k in DE_OPTIONS.keys() if de_option == k]) > 0:
+        print("\n" + "="*80)
+        print("Generating plots and statistics...")
+        print("="*80)
+        
+        # Import plotting functions
+        from plot_results import plot_convergence_curves, print_statistics
+        
+        plot_convergence_curves(results, BENCHMARKS)
+        print_statistics(results, BENCHMARKS)
+        
+        print("\n" + "="*80)
+        print("All plots saved successfully!")
+        print("="*80)
+
 
 def main():
     if len(sys.argv) > 1:
