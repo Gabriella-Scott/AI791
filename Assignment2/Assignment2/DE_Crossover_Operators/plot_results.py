@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from statistical_analysis import print_statistical_analysis
 
 # Colors for each benchmark
 BENCHMARK_COLORS = {
@@ -234,4 +235,6 @@ def print_statistics(results, benchmarks):
             cv = metrics[alg_name]['cv'][bench]
             print(f"{cv:<15.4f}", end='')
         print()
+
+    print_statistical_analysis(results, benchmarks)
 

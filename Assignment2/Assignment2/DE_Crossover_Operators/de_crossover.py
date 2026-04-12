@@ -202,7 +202,7 @@ class DifferentialEvolution:
         third_parent = self.population[third_parent_idx]
         
         parents = np.array([target, mutant, third_parent])
-        nµ = len(parents)
+        nu = len(parents)
         
         # Calculate center of mass (center of gravity)
         G = np.mean(parents, axis=0)
@@ -211,7 +211,7 @@ class DifferentialEvolution:
         epsilon = 0.5
         
         # Generate random weights that sum to 1 for uniform sampling from simplex
-        r = np.random.uniform(0, 1, nµ)
+        r = np.random.uniform(0, 1, nu)
         r = r / np.sum(r)
         
         # Create offspring using SPX formula from textbook
@@ -239,15 +239,15 @@ class DifferentialEvolution:
         third_parent_idx = np.random.choice(candidates)
         third_parent = self.population[third_parent_idx]
         
-        # Collect all nµ = 3 parents
+        # Collect all nu = 3 parents
         parents = [target, mutant, third_parent]
-        nµ = len(parents)
+        nu = len(parents)
         
         # Calculate center of mass (mean) of all parents
         x_bar = np.mean(parents, axis=0)
         
         # Randomly select one parent around which to generate offspring
-        selected_idx = np.random.randint(0, nµ)
+        selected_idx = np.random.randint(0, nu)
         selected_parent = parents[selected_idx]
         
         # Calculate direction vector from center to selected parent
@@ -285,7 +285,6 @@ class DifferentialEvolution:
         sigma2 = 0.1  # For orthogonal directions
         
         # Generate offspring according to equation (9.18)
-        # x̃(t) = x(t) + N(0,σ₁²)|d(t)| + Σ N(0,σ₂²)δ̄e_l(t)
         
         # Main direction component with Gaussian noise
         main_component = np.random.randn() * sigma1 * d_norm * d_unit
@@ -293,8 +292,8 @@ class DifferentialEvolution:
         # Orthogonal components - create orthonormal basis perpendicular to d
         orthogonal_component = np.zeros(self.dimensions)
         
-        # Generate nµ-1 = 2 orthogonal directions
-        for _ in range(nµ - 1):
+        # Generate nu-1 = 2 orthogonal directions
+        for _ in range(nu - 1):
             # Random vector
             rand_vec = np.random.randn(self.dimensions)
             # Make orthogonal to main direction
@@ -354,7 +353,7 @@ class DifferentialEvolution:
 
 TRIALS = 20
 POPULATION_SIZE = 50
-DIMENSIONS = 10
+DIMENSIONS = 10 
 MAX_FES = 10000
 # Mapping from short names to (full name, crossover type)
 DE_VARIANT_MAP = {
